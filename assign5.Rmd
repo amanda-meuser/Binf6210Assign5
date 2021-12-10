@@ -1,0 +1,67 @@
+---
+title: "BINF 6210 Assignment 5"
+author: "Amanda Meuser"
+date: "December 17th, 2021"
+output: pdf_document
+---
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy.opts=list(width.cutoff=75), tidy = TRUE, error = TRUE)
+
+```
+
+## Introduction
+
+Freshwater minnows are common globally, but with increasing anthropogenic disturbance world wide, species biodiversity is declining. Unique traits that these minnows possess may also be at risk of being lost to extinction. I will be examining the correlation between extinction status of the family *Cyprinidae* and their phylogenetic relatedness, while potentially expanding this to trait data, too. 
+
+Do certain environments require specific conservation efforts, if there is one group of closely related species that are endangered which live in the same environment.
+
+
+## Code Section 1 – Data Acquisition, Exploration, Filtering, and Quality Control
+
+I will be using the `tidyverse` package (Wickham et al., 2019), which includes `dplyr` for data wrangling and `ggplot2` for data visualization.
+
+```{r, results='hide', message=FALSE}
+
+# Package loading 
+library(tidyverse) 
+
+```
+
+### Part 1.1 - Acquisition and Exploration
+
+Data was downloaded from BOLD and IUCN Red List on Nov. 29th, 2021. From the IUCN Red List, data was retrieved from going to https://www.iucnredlist.org/search and searching the taxanomic family *Cyprinidae*. The `assessments.csv` file was used and renamed on my local computer for organization. From the BOLD database, data was retrieved by going to https://www.boldsystems.org/index.php/Public_SearchTerms and similarily searching *Cyprinidae*. The Combined TSV file was downloaded, which saved as a text file. 
+
+```{r, results='hide', message=FALSE}
+# Importing CSV file from the ICUN Red List
+dfFishStatus <- read_csv(file = "cyprinid_RedList_assessments.csv")
+
+# Importing the text file from BOLD with sequence data
+dfFishSeq <- read_delim("cyprinid_bold_data.txt", delim = "\t")
+
+```
+```{r, eval=FALSE}
+# Comparing dimensions of the files
+dim(dfFishStatus)
+head(dfFishStatus)
+summary(dfFishStatus)
+
+dim(dfFishSeq)
+head(dfFishSeq)
+summary(dfFishSeq)
+summary(nchar(dfFishSeq$nucleotides))
+```
+
+There are over 10 times as many entries with sequence data from BOLD than there are with conservation status from ICUN Red List. I will first do some individual quality control on the files, before merging them with a join function and removing some of the extra observations. 
+
+
+### Part 1.2 - Filtering and Quality Control
+
+```{r}
+
+```
+
+
+
+
+
