@@ -1,23 +1,34 @@
 ---
 title: "BINF 6210 Assignment 5"
 author: "Amanda Meuser"
+subtitle: "https://github.com/amanda-meuser/Binf6210Assign5"
 date: "December 17th, 2021"
-output: pdf_document
+output: 
+  pdf_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
 ---
 
 ```{r setup, echo=FALSE}
 knitr::opts_chunk$set(echo = TRUE, tidy.opts=list(width.cutoff=75), tidy = TRUE, error = TRUE)
 
 ```
+**GitHub Repo Link:** https://github.com/amanda-meuser/Binf6210Assign5
 
-## Introduction
+
+# Introduction
 
 Freshwater minnows are common globally, but with increasing anthropogenic disturbance world wide, species biodiversity is declining. Unique traits that these minnows possess may also be at risk of being lost to extinction. I will be examining the correlation between extinction status of the family *Cyprinidae* and their phylogenetic relatedness, while potentially expanding this to trait data, too. 
 
 Do certain environments require specific conservation efforts, if there is one group of closely related species that are endangered which live in the same environment.
 
+# Description of Data Sets
 
-## Code Section 1 – Data Acquisition, Exploration, Filtering, and Quality Control
+Data was downloaded from BOLD and IUCN Red List on Nov. 29th, 2021. From the IUCN Red List, data was retrieved from going to https://www.iucnredlist.org/search and searching the taxanomic family *Cyprinidae*. The `assessments.csv` file was used and renamed on my local computer for organization. From the BOLD database, data was retrieved by going to https://www.boldsystems.org/index.php/Public_SearchTerms and similarily searching *Cyprinidae*. The Combined TSV file was downloaded, which saved as a text file. 
+
+
+# Code Section 1 – Data Acquisition, Exploration, Filtering, and Quality Control
 
 I will be using the `tidyverse` package (Wickham et al., 2019), which includes `dplyr` for data wrangling and `ggplot2` for data visualization.
 
@@ -25,14 +36,15 @@ I will be using the `tidyverse` package (Wickham et al., 2019), which includes `
 
 # Package loading 
 library(tidyverse) 
+library(data.table)
 
 ```
 
-### Part 1.1 - Acquisition and Exploration
 
-Data was downloaded from BOLD and IUCN Red List on Nov. 29th, 2021. From the IUCN Red List, data was retrieved from going to https://www.iucnredlist.org/search and searching the taxanomic family *Cyprinidae*. The `assessments.csv` file was used and renamed on my local computer for organization. From the BOLD database, data was retrieved by going to https://www.boldsystems.org/index.php/Public_SearchTerms and similarily searching *Cyprinidae*. The Combined TSV file was downloaded, which saved as a text file. 
 
-```{r, results='hide', message=FALSE}
+## Acquisition and Exploration
+
+```{r, results='hide', message=FALSE, warning=FALSE}
 # Importing CSV file from the ICUN Red List
 dfFishStatus <- read_csv(file = "cyprinid_RedList_assessments.csv")
 
@@ -42,25 +54,74 @@ dfFishSeq <- read_delim("cyprinid_bold_data.txt", delim = "\t")
 ```
 ```{r, eval=FALSE}
 # Comparing dimensions of the files
-dim(dfFishStatus)
 head(dfFishStatus)
 summary(dfFishStatus)
-
+```
+```{r}
+dim(dfFishStatus)
+```
+```{r}
 dim(dfFishSeq)
+```
+```{r, eval=FALSE}
 head(dfFishSeq)
 summary(dfFishSeq)
 summary(nchar(dfFishSeq$nucleotides))
 ```
 
-There are over 10 times as many entries with sequence data from BOLD than there are with conservation status from ICUN Red List. I will first do some individual quality control on the files, before merging them with a join function and removing some of the extra observations. 
+There are almost 20 times as many observations with sequence data from BOLD than there are with conservation status from ICUN Red List. I will first do some individual quality control on the files, before merging them with a join function and removing some of the extra observations. 
 
 
-### Part 1.2 - Filtering and Quality Control
+## Filtering and Quality Control
+
+First, I will filter the BOLD dataset, containing the sequence data, using the `data.table` package. After each filtering step, fewer observations remain. 
 
 ```{r}
+dtFishSeq <- as.data.table(dfFishSeq)
+
+# Remove observations with NA instead of a sequence
+dtFishSeq <- dtFishSeq[complete.cases(dtFishSeq[, nucleotides])]
+
+# Filter out sequences that aren't COI-5P
+setkey(dtFishSeq, markercode)
+dtFishSeq <- dtFishSeq["COI-5P"]
+
+# Remove all sequences with dashes, with Ns at the beginning or end of the sequence, and Ns at a frequency greater than 2% in the sequence
+dtFishSeq <- dtFishSeq[!nucleotides %like% "-+"]
+dtFishSeq <- dtFishSeq[!nucleotides %like% "^N+"]
+dtFishSeq <- dtFishSeq[!nucleotides %like% "N+$"]
+dtFishSeq <- dtFishSeq[, gapN := str_count(nucleotides, c("[N]"))][, percentage_gapN := gapN/nchar(nucleotides)][!percentage_gapN > 0.02]
+
+summDash <- dtFishSeq[, str_count(nucleotides, c("-"))] # check that all of this worked
+summary(summDash)
+(summary(dtFishSeq$percentage_gapN)*100) # format as a percent rather than a decimal
+dtFishSeq <- dtFishSeq[, c("gapN", "percentage_gapN") := NULL]
+rm(summDash)
+
+# Filter out sequences longer than 700bp or shorter than 400bp
+dtFishSeq <- dtFishSeq[nchar(gsub("-", "", nucleotides)) %between% c(400, 700)]
+summary(nchar(dtFishSeq$nucleotides))
+
+# Check remaining species
+(speciesBOLD <- count(dtFishSeq, species_name, sort = T))
+
+# Remove entries without species name data
+dtFishSeq <- dtFishSeq[complete.cases(dtFishSeq[, species_name])]
+dim(dtFishSeq)
 
 ```
 
+Finally, I would like to remove empty columns from this dataset, to declutter it and make it easier to work with, especially after joining with the ICUN Red List data.
+
+```{r}
+# Find all columns that only contain NA
+nullNames <- dtFishSeq[, names(which(sapply(.SD, function(x) all(is.na(x)))))] 
+
+# Remove these columns from the data table and duplicate the data table, in case I need to go back to the original
+dtFishSeq2 <- dtFishSeq[, (nullNames) := NULL]
+dim(dtFishSeq2)
+rm(nullNames)
+```
 
 
 
