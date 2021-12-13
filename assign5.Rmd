@@ -6,16 +6,16 @@ date: "December 17th, 2021"
 output: 
   pdf_document:
     toc: true
-    toc_depth: 2
+    toc_depth: 3
     number_sections: true
 ---
 
 ```{r setup, echo=FALSE}
-knitr::opts_chunk$set(echo = TRUE, tidy.opts=list(width.cutoff=75), tidy = TRUE, error = TRUE)
+knitr::opts_chunk$set(echo = TRUE, tidy.opts=list(width.cutoff=65), tidy = TRUE, error = TRUE)
 
 ```
-**GitHub Repo Link:** https://github.com/amanda-meuser/Binf6210Assign5
 
+\clearpage
 
 # Introduction
 
@@ -35,9 +35,16 @@ I will be using the `tidyverse` package (Wickham et al., 2019), which includes `
 ```{r, results='hide', message=FALSE}
 
 # Package loading 
-library(tidyverse) 
-library(data.table)
-
+library(tidyverse)  # for manipulation of data.frames 
+library(data.table) # for manipulation of data.tables
+library(msa)        # for sequence alignment
+library(Biostrings) # for creating DNAStringSet
+library(seqinr)     # for computing distance matrix
+library(ape)        # for creating basic dendrogram
+library(wesanderson)# for plot colour palettes
+#devtools::install_git("https://git.rud.is/hrbrmstr/waffle.git")
+library(waffle)     # for waffle plot
+library(magrittr)   # waffle dependency
 ```
 
 
@@ -45,7 +52,7 @@ library(data.table)
 ## Acquisition and Exploration
 
 ```{r, results='hide', message=FALSE, warning=FALSE}
-# Importing CSV file from the ICUN Red List
+# Importing CSV file from the IUCN Red List
 dfFishStatus <- read_csv(file = "cyprinid_RedList_assessments.csv")
 
 # Importing the text file from BOLD with sequence data
@@ -69,10 +76,12 @@ summary(dfFishSeq)
 summary(nchar(dfFishSeq$nucleotides))
 ```
 
-There are almost 20 times as many observations with sequence data from BOLD than there are with conservation status from ICUN Red List. I will first do some individual quality control on the files, before merging them with a join function and removing some of the extra observations. 
+There are almost 20 times as many observations with sequence data from BOLD than there are with conservation status from IUCN Red List. I will first do some individual quality control on the files, before merging them with a join function and removing some of the extra observations. 
 
 
 ## Filtering and Quality Control
+
+### BOLD Data Set
 
 First, I will filter the BOLD dataset, containing the sequence data, using the `data.table` package. After each filtering step, fewer observations remain. 
 
@@ -103,7 +112,7 @@ dtFishSeq <- dtFishSeq[nchar(gsub("-", "", nucleotides)) %between% c(400, 700)]
 summary(nchar(dtFishSeq$nucleotides))
 
 # Check remaining species
-(speciesBOLD <- count(dtFishSeq, species_name, sort = T))
+dtFishSeq[, .N, by = species_name][order(-N)]
 
 # Remove entries without species name data
 dtFishSeq <- dtFishSeq[complete.cases(dtFishSeq[, species_name])]
@@ -111,18 +120,234 @@ dim(dtFishSeq)
 
 ```
 
-Finally, I would like to remove empty columns from this dataset, to declutter it and make it easier to work with, especially after joining with the ICUN Red List data.
+I've noticed that some of the species names -- formatted *genus species* -- are actually just the genus name followed by 'sp.' or 'cf.' or 'aff.' and then a string of letters or numbers instead of a species name. As well, I noted a couple of hybrid crosses with X in between two species names, so I will be removing these, too. 
+
+```{r, results='hide'} 
+dtFishSeq <- dtFishSeq %>%
+  filter(!str_detect(species_name, "sp.")) %>%
+  filter(!str_detect(species_name, "cf.")) %>%
+  filter(!str_detect(species_name, "aff.")) %>%
+  filter(!str_detect(species_name, " X "))
+
+summary(dtFishSeq)
+unique(dtFishSeq$species_name)
+```
+
+Finally, I would like to remove empty columns from this dataset, to declutter it and make it easier to work with, especially after joining with the IUCN Red List data.
 
 ```{r}
 # Find all columns that only contain NA
 nullNames <- dtFishSeq[, names(which(sapply(.SD, function(x) all(is.na(x)))))] 
 
-# Remove these columns from the data table and duplicate the data table, in case I need to go back to the original
+# Remove these columns from the data table and create a duplicate of the data table
 dtFishSeq2 <- dtFishSeq[, (nullNames) := NULL]
 dim(dtFishSeq2)
 rm(nullNames)
 ```
 
+I need to reduce this data set so that I'm left with only one sequence per species, to match the IUCN data set, which has one Red List classification per species. 
+
+```{r, results='hide'}  
+unique(dtFishSeq2$nucleotides)
+```
+
+Using the `unique()` function above, I can see that there are 9189 unique sequences. I will first filter by this, to cut down on the size of the data set. 
+
+```{r, results='hide'} 
+distinctFishSeq <- dtFishSeq %>% 
+  distinct(nucleotides, .keep_all = TRUE)
+
+summary(distinctFishSeq)
+unique(dtFishSeq2$nucleotides)
+```
+
+I now 9264 unique sequences. This is still more than 1 sequence per species, however, so I will remove/collapse the additional sequences for each species so that I only have 1 sequence per species, then join with the IUCN data set. 
+
+```{r, results='hide'}
+# This will simply keep the first entry for each unique entry in the species_name column. While this may not capture all sequence variation, it is an unbiased way to choose one individual to phylogenetically represent the species. 
+distinctFishSeq2 <- distinctFishSeq %>% 
+  distinct(species_name, .keep_all = TRUE) 
+
+unique(distinctFishSeq2$nucleotides)
+dim(distinctFishSeq2)
+```
+
+I now have the same number of sequences as observations, so I know that I have one sequence per species. 
+
+### IUCN Data Set
+
+Now, I will filter the IUCN Red List data set. There's much less to filter for this dataset, as there is only one entry per species. 
+
+```{r, results='hide'}
+dtFishStatus <- as.data.table(dfFishStatus)
+
+# Total species
+dtFishStatus[, .N]
+
+# Check number of each conservation status
+dtFishStatus[, .N, by = redlistCategory][order(-N)]
+
+# Remove Data Deficient enteries 
+dtFishStatus <- dtFishStatus[!redlistCategory == "Data Deficient"]
+dtFishStatus[, .N, by = redlistCategory][order(-N)] #check that it worked
+
+# Move mislabeled observation of Red List Status into proper category
+dtFishStatus$redlistCategory[dtFishStatus$redlistCategory == "Lower Risk/near threatened"] <- "Near Threatened"
+dtFishStatus[, .N, by = redlistCategory][order(-N)] #check that it worked
+
+# Subset this data set to keep only relevant columns containing species name and conservation status.
+dtFishStatus2 <- dtFishStatus[, c("scientificName", "redlistCategory"), with = F]
+
+# Assign a numerical rank to IUCN Red List category, for later plotting
+dtFishStatus2$redlistRank <- as.numeric(factor(dtFishStatus2$redlistCategory, levels = c("Least Concern", "Near Threatened", "Vulnerable", "Endangered", "Critically Endangered", "Extinct in the Wild", "Extinct"))) 
+
+```
+
+### Combined Data Set
+
+```{r, results='hide'}
+# Merge data sets with data.table
+dtFishJoin <- merge(distinctFishSeq2, dtFishStatus2, by.x = "species_name", by.y = "scientificName", all.x = FALSE, all.y = FALSE)
+
+class(dtFishJoin)
+dim(dtFishJoin)
+head(dtFishJoin)
+names(dtFishJoin)
+```
+
+There are 965 species in my combined data set, however, as we were advised to have about 50-100 species for this project, I will constrict my data set based on country, to keep only species found in North America. 
+
+```{r, results='hide'}
+# Look at the number of species per country
+(country <- table(dtFishJoin$country))
+
+# Filter to keep only species from Canada, United States, or Mexico
+dtFishJoinNA <- dtFishJoin[country %like% "Canada|United States|Mexico"]
+
+dim(dtFishJoinNA)
+```
+
+194 observations is a far easier amount of data to work with than the original 965; however, this is still too many. I will take a random sample of 100 as a final reduction. 
+
+```{r}
+set.seed(12)
+dtFishJoin100 <- sample_n(dtFishJoinNA, 100, replace = F)
+
+```
 
 
+```{r, results='hide'}
+
+# Create a subset of the data frame (just identifier and sequence)
+FishSeqs <- dtFishJoin100 %>%
+  select(c(species_name, nucleotides))
+
+# Convert data table/frame to a DNA string set
+FishSeqs <- DNAStringSet(FishSeqs$nucleotides)
+class(FishSeqs)
+
+# Sequence alignment
+AlignedFishSeqs <- msa(FishSeqs)
+AlignedFishSeqs
+(msaCheckNames(AlignedFishSeqs))
+
+?msaCheckNames()
+
+msaPrettyPrint(AlignedFishSeqs, file=tmpFile, output="pdf", y=c(164, 213),
+               subset=c(1:6), showNames="left", showLogo="top", 
+               logoColor="rasmol", showConsensus = "none", showLegend=FALSE,
+               askForOverwrite=FALSE)
+
+ConvertAlign <- msaConvert(AlignedFishSeqs, type="seqinr::alignment")
+
+DistMatrix <- dist.alignment(ConvertAlign, "identity")
+
+FishTree <- nj(DistMatrix)
+plot(FishTree, main="Phylogenetic Tree of Cyprinid Sequences")
+
+```
+
+# Main Software Tools Description
+
+
+
+# Code Section 2 - Main Analysis
+
+## Calculation of Phylosignal
+
+```{r}
+
+```
+
+
+
+# Figures
+
+## Fig 1: Barplot of species, per IUCN status, per country
+
+```{r, fig.show='hold', fig.cap = "Barplot of number of species per ICUN Red List classification. 1 box = 10 species, n = 100."}
+
+# Define colour palette 
+plotCol <- wes_palette("Zissou1", 5, type = "continuous")
+
+# Create a small data frame of ranked conservation status and frequency
+FishWaffle <- dtFishJoin100 %>%
+  dplyr::count(redlistRank)
+
+# Make waffle plot
+ggplot(FishWaffle, aes(fill = redlistRank, values = n)) +
+  geom_waffle(n_rows = 10, size = 0.33, colour = "white", flip = T) +
+  scale_fill_manual(name = "IUCN Conservation \nStatus", values = plotCol, labels = c("Least Concern", "Near Threatened", "Vulnerable", "Endangered", "Critically Endangered")) +
+  coord_equal() +
+  theme_void() 
+
+```
+
+
+## Fig 2: Dendeogram or msa PrettyPrint
+
+```{r}
+
+
+
+```
+
+
+## Fig 3: Dendrogram coloured by ICUN status
+
+```{r}
+
+```
+
+
+## Fig 4: Correlation of IUCN status and phylogeny
+
+```{r}
+#phyloCorrelogram from phylosignal
+
+```
+
+
+
+# Results and Discussion
+
+
+
+# Acknowledgements
+
+
+# Bibliography
+https://rosannavanhespen.nl/rmarkdown/writing-your-thesis-with-r-markdown-2-text-citations-and-equations/
+
+https://stackoverflow.com/questions/64759969/what-is-the-most-efficient-way-to-remove-empty-columns-in-a-datatable-in-r
+
+https://cran.r-project.org/web/packages/data.table/vignettes/datatable-intro.html
+
+https://statisticsglobe.com/select-subset-of-data-table-columns-in-r
+
+https://github.com/hrbrmstr/waffle
+
+https://github.com/karthik/wesanderson
+
+https://bioconductor.org/packages/release/bioc/html/Biostrings.html (biostrings)
 
