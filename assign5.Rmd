@@ -41,10 +41,13 @@ library(msa)        # for sequence alignment
 library(Biostrings) # for creating DNAStringSet
 library(seqinr)     # for computing distance matrix
 library(ape)        # for creating basic dendrogram
+library(phangorn)   # for ML phylogenetic analysis
 library(wesanderson)# for plot colour palettes
 #devtools::install_git("https://git.rud.is/hrbrmstr/waffle.git")
 library(waffle)     # for waffle plot
 library(magrittr)   # waffle dependency
+library(phytools)   # for IUCN dendrogram
+
 ```
 
 
@@ -95,17 +98,19 @@ dtFishSeq <- dtFishSeq[complete.cases(dtFishSeq[, nucleotides])]
 setkey(dtFishSeq, markercode)
 dtFishSeq <- dtFishSeq["COI-5P"]
 
-# Remove all sequences with dashes, with Ns at the beginning or end of the sequence, and Ns at a frequency greater than 2% in the sequence
-dtFishSeq <- dtFishSeq[!nucleotides %like% "-+"]
-dtFishSeq <- dtFishSeq[!nucleotides %like% "^N+"]
-dtFishSeq <- dtFishSeq[!nucleotides %like% "N+$"]
+# Remove all sequences with dashes or Xs, with Ns at the beginning or end of the sequence, and Ns at a frequency greater than 2% in the sequence
+dtFishSeq <- dtFishSeq[!nucleotides %like% "-+"][!nucleotides %like% "X+"][!nucleotides %like% "^N+"][!nucleotides %like% "N+$"]
 dtFishSeq <- dtFishSeq[, gapN := str_count(nucleotides, c("[N]"))][, percentage_gapN := gapN/nchar(nucleotides)][!percentage_gapN > 0.02]
 
-summDash <- dtFishSeq[, str_count(nucleotides, c("-"))] # check that all of this worked
+# Check that all of this worked
+summDash <- dtFishSeq[, str_count(nucleotides, c("-"))] 
 summary(summDash)
+summX <- dtFishSeq[, str_count(nucleotides, c("X"))]
+summary(summX)
+
 (summary(dtFishSeq$percentage_gapN)*100) # format as a percent rather than a decimal
 dtFishSeq <- dtFishSeq[, c("gapN", "percentage_gapN") := NULL]
-rm(summDash)
+rm(summDash, summX)
 
 # Filter out sequences longer than 700bp or shorter than 400bp
 dtFishSeq <- dtFishSeq[nchar(gsub("-", "", nucleotides)) %between% c(400, 700)]
@@ -151,7 +156,7 @@ I need to reduce this data set so that I'm left with only one sequence per speci
 unique(dtFishSeq2$nucleotides)
 ```
 
-Using the `unique()` function above, I can see that there are 9189 unique sequences. I will first filter by this, to cut down on the size of the data set. 
+Using the `unique()` function above, I can see that there are 9262 unique sequences. I will first filter by this, to cut down on the size of the data set. 
 
 ```{r, results='hide'} 
 distinctFishSeq <- dtFishSeq %>% 
@@ -161,10 +166,9 @@ summary(distinctFishSeq)
 unique(dtFishSeq2$nucleotides)
 ```
 
-I now 9264 unique sequences. This is still more than 1 sequence per species, however, so I will remove/collapse the additional sequences for each species so that I only have 1 sequence per species, then join with the IUCN data set. 
+I now 9264 unique sequences. This is still more than 1 sequence per species, however, so I will remove/collapse the additional sequences for each species so that I only have 1 sequence per species. Using the `distinct()` function will simply keep the first entry for each unique entry in the species_name column. While this may not capture all sequence variation, it is an unbiased way to choose one individual to phylogenetically represent the species. 
 
 ```{r, results='hide'}
-# This will simply keep the first entry for each unique entry in the species_name column. While this may not capture all sequence variation, it is an unbiased way to choose one individual to phylogenetically represent the species. 
 distinctFishSeq2 <- distinctFishSeq %>% 
   distinct(species_name, .keep_all = TRUE) 
 
@@ -227,45 +231,59 @@ dtFishJoinNA <- dtFishJoin[country %like% "Canada|United States|Mexico"]
 dim(dtFishJoinNA)
 ```
 
-194 observations is a far easier amount of data to work with than the original 965; however, this is still too many. I will take a random sample of 100 as a final reduction. 
+192 observations is a far easier amount of data to work with than the original 963. I will keep these samples to retain as much variability in the data as possible, and only down sample further if needed for visualizations. I have shown, in Fig. 1, that I primarily have species of "Lease Concern" from the IUCN Red List, but that there are a small amount of species that are threatened or endangered. 
 
-```{r}
-set.seed(12)
-dtFishJoin100 <- sample_n(dtFishJoinNA, 100, replace = F)
-
-```
-
+Next, I will align my sequences using `msa()`. I chose to use the default ClustalW algorithm over the well-known MUSCLE algorithm, as ClustalW is comparable in alignment score to MUSCLE and while MUSCLE is faster with large quantities of sequences or with long sequences, my data set consists of only 100 short sequences (Edgar, 2004). Thus, the extra computational power is not needed and ClustalW will perform adequately for this assignment. I chose Neighbour-Joining (NJ) method for clustering, as the secondary option UPGMA has been known to crash the R session on Windows, and NJ has been successfully used for fish species in the literature (Zou et al., 2020). I used the default parameters for all other arguments. 
 
 ```{r, results='hide'}
 
+# # Create a subset of the data frame (just identifier and sequence)
+# FishSeqs <- dtFishJoin100 %>%
+#   select(c(species_name, nucleotides))
+# 
+# # Convert data table/frame to a DNA string set
+# FishSeqs <- DNAStringSet(FishSeqs$nucleotides)
+# class(FishSeqs)
+# 
+# # Add names to DNAStringSet
+# names(FishSeqs) <- paste(dtFishJoin100$species_name)
+# metadata(FishSeqs)
+# 
+# # Sequence alignment
+# AlignedFishSeqs <- msaClustalW(FishSeqs, cluster = "nj")
+# AlignedFishSeqs
+
+
+# msaPrettyPrint(AlignedFishSeqs, file=tmpFile, output="pdf", y=c(164, 213),
+#                subset=c(1:6), showNames="left", showLogo="top", 
+#                logoColor="rasmol", showConsensus = "none", showLegend=FALSE,
+#                askForOverwrite=FALSE)
+
+```
+
+
+```{r}
 # Create a subset of the data frame (just identifier and sequence)
-FishSeqs <- dtFishJoin100 %>%
+FishSeqsNA <- dtFishJoinNA %>%
   select(c(species_name, nucleotides))
 
 # Convert data table/frame to a DNA string set
-FishSeqs <- DNAStringSet(FishSeqs$nucleotides)
-class(FishSeqs)
+FishSeqsNA <- DNAStringSet(FishSeqsNA$nucleotides)
+class(FishSeqsNA)
+
+# Add names to DNAStringSet
+names(FishSeqsNA) <- paste(dtFishJoinNA$species_name)
+metadata(FishSeqsNA)
 
 # Sequence alignment
-AlignedFishSeqs <- msa(FishSeqs)
-AlignedFishSeqs
-(msaCheckNames(AlignedFishSeqs))
-
-?msaCheckNames()
-
-msaPrettyPrint(AlignedFishSeqs, file=tmpFile, output="pdf", y=c(164, 213),
-               subset=c(1:6), showNames="left", showLogo="top", 
-               logoColor="rasmol", showConsensus = "none", showLegend=FALSE,
-               askForOverwrite=FALSE)
-
-ConvertAlign <- msaConvert(AlignedFishSeqs, type="seqinr::alignment")
-
-DistMatrix <- dist.alignment(ConvertAlign, "identity")
-
-FishTree <- nj(DistMatrix)
-plot(FishTree, main="Phylogenetic Tree of Cyprinid Sequences")
+AlignedFishSeqsNA <- msaClustalW(FishSeqsNA, cluster = "nj")
+AlignedFishSeqsNA
 
 ```
+
+I have visualized the sequence alignment as a simple dendrogram, in Fig. 2. There appear to be no outlier sequences, so I will continue with my main analysis. 
+
+
 
 # Main Software Tools Description
 
@@ -285,29 +303,67 @@ plot(FishTree, main="Phylogenetic Tree of Cyprinid Sequences")
 
 ## Fig 1: Barplot of species, per IUCN status, per country
 
-```{r, fig.show='hold', fig.cap = "Barplot of number of species per ICUN Red List classification. 1 box = 10 species, n = 100."}
+```{r, fig.show='hold', fig.cap = "Barplot of number of species per ICUN Red List classification. 1 box = ~2 species, n = 192."}
 
-# Define colour palette 
-plotCol <- wes_palette("Zissou1", 5, type = "continuous")
+# # Define colour palette 
+ plotCol <- wes_palette("Zissou1", 5, type = "continuous")
 
-# Create a small data frame of ranked conservation status and frequency
-FishWaffle <- dtFishJoin100 %>%
+FishWaffleNA <- dtFishJoinNA %>%
   dplyr::count(redlistRank)
 
 # Make waffle plot
-ggplot(FishWaffle, aes(fill = redlistRank, values = n)) +
-  geom_waffle(n_rows = 10, size = 0.33, colour = "white", flip = T) +
+ggplot(FishWaffleNA, aes(fill = redlistRank, values = n)) +
+  geom_waffle(n_rows = 10, size = 0.33, colour = "white", flip = T, make_proportional = T) +
   scale_fill_manual(name = "IUCN Conservation \nStatus", values = plotCol, labels = c("Least Concern", "Near Threatened", "Vulnerable", "Endangered", "Critically Endangered")) +
   coord_equal() +
   theme_void() 
 
+
+# # Create a small data frame of ranked conservation status and frequency
+# FishWaffle <- dtFishJoin100 %>%
+#   dplyr::count(redlistRank)
+# 
+# # Make waffle plot
+# ggplot(FishWaffle, aes(fill = redlistRank, values = n)) +
+#   geom_waffle(n_rows = 10, size = 0.33, colour = "white", flip = T, make_proportional = T) +
+#   scale_fill_manual(name = "IUCN Conservation \nStatus", values = plotCol, labels = c("Least Concern", "Near Threatened", "Vulnerable", "Endangered", "Critically Endangered")) +
+#   coord_equal() +
+#   theme_void() 
+
+
 ```
 
 
-## Fig 2: Dendeogram or msa PrettyPrint
+## Fig 2: Dendeogram 
 
-```{r}
 
+```{r, fig.show='hold', fig.cap = "Phylogenetic Tree of Cyprinid Sequences. Tip labels have been removed for clarity. n = 192"}
+# Converting the alignment to a seqinr object
+ConvertAlignNA <- msaConvert(AlignedFishSeqsNA, type="seqinr::alignment")
+
+# Using seqinr to create a distance matrix from the aligned sequences
+DistMatrixNA <- dist.alignment(ConvertAlignNA, "identity")
+
+# Using ape to create a Neighbour-Joining Tree
+FishTreeNA <- nj(DistMatrixNA)
+
+# Create dendrogram, using same colour palette as waffle plot
+plot(FishTreeNA, edge.color = plotCol[1], tip.color = "white", cex = 0.01)
+
+#---------------------------------------------------------------------------------
+# for n = 100
+
+# ConvertAlign <- msaConvert(AlignedFishSeqs, type="seqinr::alignment")
+# 
+# # Using seqinr to create a distance matrix from the aligned sequences
+# DistMatrix <- dist.alignment(ConvertAlign, "identity")
+# 
+# # Using ape to create a Neighbour-Joining Tree
+# FishTree <- nj(DistMatrix)
+# 
+# tipCol <- wes_palette("Zissou1", 5)
+# 
+# plot(FishTree, cex = 0.6, edge.color = tipCol[5], tip.color = "black", no.margin = T)
 
 
 ```
@@ -316,6 +372,70 @@ ggplot(FishWaffle, aes(fill = redlistRank, values = n)) +
 ## Fig 3: Dendrogram coloured by ICUN status
 
 ```{r}
+# Move only the Least Concern IUCN status into a separate data frame
+onlyLC <- dtFishJoinNA %>%
+  filter(redlistCategory == "Least Concern")
+
+# Move all other categories into another data frame
+others <- dtFishJoinNA %>%
+  filter(redlistCategory != "Least Concern")
+
+# Sample down only the Lease Concern so that there's 30 
+set.seed(20)
+onlyLC <- sample_n(onlyLC, 30, replace = F)
+
+# Combine the two data frames
+dtFish60 <- rbind(others, onlyLC)
+
+dim(dtFish60)
+table(dtFish60$redlistCategory)
+class(dtFish60)
+rm(onlyLC)
+```
+
+There are now only 60 observations in this data frame/table, so it will be easier to make into a dendrogram. First, I need to align only these 60 sequences, and ensure that they are an object of class "phylo", so that they can be plotted. 
+
+```{r}
+# Create a subset of the data frame (just identifier and sequence)
+FishSeqs60 <- dtFish60 %>%
+  select(c(species_name, nucleotides))
+
+# Convert data table/frame to a DNA string set
+FishSeqs60 <- DNAStringSet(FishSeqs60$nucleotides)
+class(FishSeqs60)
+
+# Add names to DNAStringSet
+names(FishSeqs60) <- paste(dtFish60$species_name)
+metadata(FishSeqs60)
+
+# Sequence alignment
+AlignedFishSeqs60 <- msaClustalW(FishSeqs60, cluster = "nj")
+
+# Converting the alignment to a seqinr object
+ConvertAlign60 <- msaConvert(AlignedFishSeqs60, type="seqinr::alignment")
+
+# Using seqinr to create a distance matrix from the aligned sequences
+DistMatrix60 <- dist.alignment(ConvertAlign60, "identity")
+
+# Using ape to create a Neighbour-Joining Tree
+FishTree60 <- nj(DistMatrix60)
+class(FishTree60)
+
+```
+
+```{r}
+# Isolate just the ranks, indicating Red List Category
+ranks <- dtFish60$redlistRank
+
+# Assign species names to their rank
+ranks <- structure(ranks, names = (dtFish60$species_name))
+
+# Create the dendrogram
+tree <- contMap(FishTree60, ranks, plot=FALSE)
+tree <- setMap(tree, invert = TRUE)
+
+# Plot the dendrogram
+plot(tree, fsize = c(0.6,1), outline = FALSE, lwd = c(3,7), leg.txt = "Red List Category")
 
 ```
 
