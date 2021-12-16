@@ -3,6 +3,7 @@ title: "BINF 6210 Assignment 5"
 author: "Amanda Meuser"
 subtitle: "https://github.com/amanda-meuser/Binf6210Assign5"
 date: "December 17th, 2021"
+bibliography: library.bib
 output: 
   pdf_document:
     toc: true
@@ -23,6 +24,8 @@ Freshwater minnows are common globally, but with increasing anthropogenic distur
 
 Do certain environments require specific conservation efforts, if there is one group of closely related species that are endangered which live in the same environment.
 
+
+
 # Description of Data Sets
 
 Data was downloaded from BOLD and IUCN Red List on Nov. 29th, 2021. From the IUCN Red List, data was retrieved from going to https://www.iucnredlist.org/search and searching the taxanomic family *Cyprinidae*. The `assessments.csv` file was used and renamed on my local computer for organization. From the BOLD database, data was retrieved by going to https://www.boldsystems.org/index.php/Public_SearchTerms and similarily searching *Cyprinidae*. The Combined TSV file was downloaded, which saved as a text file. 
@@ -30,24 +33,26 @@ Data was downloaded from BOLD and IUCN Red List on Nov. 29th, 2021. From the IUC
 
 # Code Section 1 – Data Acquisition, Exploration, Filtering, and Quality Control
 
-I will be using the `tidyverse` package (Wickham et al., 2019), which includes `dplyr` for data wrangling and `ggplot2` for data visualization.
+I will be using the `tidyverse` package [@Wickham2019], which includes `dplyr` for data wrangling and `ggplot2` for data visualization.
+The package `phylosignal`, will be used to calculate the Lambda parameter of the phylosignal between cyprinid fish species and their IUCN Red List status [@Keck2016].
 
 ```{r, results='hide', message=FALSE}
 
 # Package loading 
+library(tools)
 library(tidyverse)  # for manipulation of data.frames 
 library(data.table) # for manipulation of data.tables
 library(msa)        # for sequence alignment
 library(Biostrings) # for creating DNAStringSet
 library(seqinr)     # for computing distance matrix
 library(ape)        # for creating basic dendrogram
-library(phangorn)   # for ML phylogenetic analysis
 library(wesanderson)# for plot colour palettes
 #devtools::install_git("https://git.rud.is/hrbrmstr/waffle.git")
 library(waffle)     # for waffle plot
 library(magrittr)   # waffle dependency
 library(phytools)   # for IUCN dendrogram
-
+library(phylosignal)# for calculating phylosignal
+library(phylobase)  # for creating phylo4d object
 ```
 
 
@@ -128,17 +133,13 @@ dim(dtFishSeq)
 I've noticed that some of the species names -- formatted *genus species* -- are actually just the genus name followed by 'sp.' or 'cf.' or 'aff.' and then a string of letters or numbers instead of a species name. As well, I noted a couple of hybrid crosses with X in between two species names, so I will be removing these, too. 
 
 ```{r, results='hide'} 
-dtFishSeq <- dtFishSeq %>%
-  filter(!str_detect(species_name, "sp.")) %>%
-  filter(!str_detect(species_name, "cf.")) %>%
-  filter(!str_detect(species_name, "aff.")) %>%
-  filter(!str_detect(species_name, " X "))
+dtFishSeq <- dtFishSeq[!species_name %like% "sp."][!species_name %like% "cf."][!species_name %like% "aff."][!species_name %like% " X "]
 
 summary(dtFishSeq)
 unique(dtFishSeq$species_name)
 ```
 
-Finally, I would like to remove empty columns from this dataset, to declutter it and make it easier to work with, especially after joining with the IUCN Red List data.
+Finally, I would like to remove empty columns from this data set, to declutter it and make it easier to work with, especially after joining with the IUCN Red List data.
 
 ```{r}
 # Find all columns that only contain NA
@@ -219,53 +220,25 @@ head(dtFishJoin)
 names(dtFishJoin)
 ```
 
-There are 965 species in my combined data set, however, as we were advised to have about 50-100 species for this project, I will constrict my data set based on country, to keep only species found in North America. 
+There are 965 species in my combined data set, however, as we were advised to have about 50-100 species for this project, I will constrict my data set based on country, to keep only species found in North America. Additionally, for whatever reason, 2 species have very short, negative branch lengths later on when I create my simple dendrogram, so I've been advised by Jacqueline to just remove these two.
 
 ```{r, results='hide'}
 # Look at the number of species per country
 (country <- table(dtFishJoin$country))
 
-# Filter to keep only species from Canada, United States, or Mexico
-dtFishJoinNA <- dtFishJoin[country %like% "Canada|United States|Mexico"]
+# Filter to keep only species from Canada, United States, or Mexico, and remove 2 observations
+dtFishJoinNA <- dtFishJoin[country %like% "Canada|United States|Mexico"][!species_name %like% "Lythrurus fumeus|Pteronotropis hypselopterus"]
 
 dim(dtFishJoinNA)
 ```
 
-192 observations is a far easier amount of data to work with than the original 963. I will keep these samples to retain as much variability in the data as possible, and only down sample further if needed for visualizations. I have shown, in Fig. 1, that I primarily have species of "Lease Concern" from the IUCN Red List, but that there are a small amount of species that are threatened or endangered. 
+192 observations is a far easier amount of data to work with than the original 965. I will keep these samples to retain as much variability in the data as possible, and only down sample further if needed for visualizations. I have shown, in Fig. 1, that I primarily have species of "Lease Concern" from the IUCN Red List, but that there are a small amount of species that are threatened or endangered. 
 
-Next, I will align my sequences using `msa()`. I chose to use the default ClustalW algorithm over the well-known MUSCLE algorithm, as ClustalW is comparable in alignment score to MUSCLE and while MUSCLE is faster with large quantities of sequences or with long sequences, my data set consists of only 100 short sequences (Edgar, 2004). Thus, the extra computational power is not needed and ClustalW will perform adequately for this assignment. I chose Neighbour-Joining (NJ) method for clustering, as the secondary option UPGMA has been known to crash the R session on Windows, and NJ has been successfully used for fish species in the literature (Zou et al., 2020). I used the default parameters for all other arguments. 
-
-```{r, results='hide'}
-
-# # Create a subset of the data frame (just identifier and sequence)
-# FishSeqs <- dtFishJoin100 %>%
-#   select(c(species_name, nucleotides))
-# 
-# # Convert data table/frame to a DNA string set
-# FishSeqs <- DNAStringSet(FishSeqs$nucleotides)
-# class(FishSeqs)
-# 
-# # Add names to DNAStringSet
-# names(FishSeqs) <- paste(dtFishJoin100$species_name)
-# metadata(FishSeqs)
-# 
-# # Sequence alignment
-# AlignedFishSeqs <- msaClustalW(FishSeqs, cluster = "nj")
-# AlignedFishSeqs
-
-
-# msaPrettyPrint(AlignedFishSeqs, file=tmpFile, output="pdf", y=c(164, 213),
-#                subset=c(1:6), showNames="left", showLogo="top", 
-#                logoColor="rasmol", showConsensus = "none", showLegend=FALSE,
-#                askForOverwrite=FALSE)
-
-```
-
+Next, I will align my sequences using `msa()`. I chose to use the default ClustalW algorithm over the well-known MUSCLE algorithm, as ClustalW is comparable in alignment score to MUSCLE and while MUSCLE is faster with large quantities of sequences or with long sequences, my data set consists of only 100 short sequences [@Edgar2004]. Thus, the extra computational power is not needed and ClustalW will perform adequately for this assignment. I chose Neighbour-Joining (NJ) method for clustering, as the secondary option UPGMA has been known to crash the R session on Windows, and NJ has been successfully used for fish species in the literature [@Zou2020]. I used the default parameters for all other arguments. 
 
 ```{r}
 # Create a subset of the data frame (just identifier and sequence)
-FishSeqsNA <- dtFishJoinNA %>%
-  select(c(species_name, nucleotides))
+FishSeqsNA <- dtFishJoinNA[, c("species_name", "nucleotides")]
 
 # Convert data table/frame to a DNA string set
 FishSeqsNA <- DNAStringSet(FishSeqsNA$nucleotides)
@@ -279,13 +252,19 @@ metadata(FishSeqsNA)
 AlignedFishSeqsNA <- msaClustalW(FishSeqsNA, cluster = "nj")
 AlignedFishSeqsNA
 
+# msaPrettyPrint(AlignedFishSeqs, file=tmpFile, output="pdf", y=c(164, 213),
+#                subset=c(1:6), showNames="left", showLogo="top", 
+#                logoColor="rasmol", showConsensus = "none", showLegend=FALSE,
+#                askForOverwrite=FALSE)
+
 ```
 
 I have visualized the sequence alignment as a simple dendrogram, in Fig. 2. There appear to be no outlier sequences, so I will continue with my main analysis. 
 
 
-
 # Main Software Tools Description
+
+I chose to use the package `phylosignal` as my main software tool [@Keck2016]. I chose this package for a couple of reasons. Aside from meeting my main criterion of being able to calculate the Lambda parameter for a trait, I primarily chose `phylosignal` because it contained many functions for visualizing the output from the phylosignal calculation, done with the `phyloSignal()` function. Particularly, I utilized the `phyloCorrelogram()` function to create a correlogram which displays the correlation between phylogenetic distance and IUCN Red List status. Additionally, the `phylosignal` package uses phylogenetic trees of the object type "phylo", which is a common type that makes it compatible with other phylogenetic R packages, such as `ape`, `phytools`,
 
 
 
@@ -294,8 +273,39 @@ I have visualized the sequence alignment as a simple dendrogram, in Fig. 2. Ther
 ## Calculation of Phylosignal
 
 ```{r}
+# Converting the alignment to a seqinr object
+ConvertAlignNA <- msaConvert(AlignedFishSeqsNA, type="seqinr::alignment")
+
+# Using a function from the package seqinr to create a distance matrix of the aligned sequences
+DistMatrixNA <- dist.alignment(ConvertAlignNA, "identity")
+
+# Using a function from the package ape to create a Neighbour-Joining Tree
+FishTreeNA <- nj(DistMatrixNA)
+
+# Ensure that it's in "phylo" format
+class(FishTreeNA)
+
+# Isolate just the ranks, indicating Red List Category
+ranksNA <- dtFishJoinNA$redlistRank
+
+# Assign species names to their rank
+ranksNA <- structure(ranksNA, names = (dtFishJoinNA$species_name))
+ranksNA <- data.frame(ranksNA)
+
+# Create phylo4d object
+phyloSigFish <- phylo4d(FishTreeNA, ranksNA)
+
+# Calculate Lambda parameter for phylosignal
+signal <- phyloSignal(p4d = phyloSigFish, method = "Lambda")
+
+(signal)
 
 ```
+
+
+# Results and Discussion
+
+
 
 
 
@@ -318,53 +328,16 @@ ggplot(FishWaffleNA, aes(fill = redlistRank, values = n)) +
   coord_equal() +
   theme_void() 
 
-
-# # Create a small data frame of ranked conservation status and frequency
-# FishWaffle <- dtFishJoin100 %>%
-#   dplyr::count(redlistRank)
-# 
-# # Make waffle plot
-# ggplot(FishWaffle, aes(fill = redlistRank, values = n)) +
-#   geom_waffle(n_rows = 10, size = 0.33, colour = "white", flip = T, make_proportional = T) +
-#   scale_fill_manual(name = "IUCN Conservation \nStatus", values = plotCol, labels = c("Least Concern", "Near Threatened", "Vulnerable", "Endangered", "Critically Endangered")) +
-#   coord_equal() +
-#   theme_void() 
-
-
 ```
 
 
 ## Fig 2: Dendeogram 
 
 
-```{r, fig.show='hold', fig.cap = "Phylogenetic Tree of Cyprinid Sequences. Tip labels have been removed for clarity. n = 192"}
-# Converting the alignment to a seqinr object
-ConvertAlignNA <- msaConvert(AlignedFishSeqsNA, type="seqinr::alignment")
-
-# Using seqinr to create a distance matrix from the aligned sequences
-DistMatrixNA <- dist.alignment(ConvertAlignNA, "identity")
-
-# Using ape to create a Neighbour-Joining Tree
-FishTreeNA <- nj(DistMatrixNA)
+```{r, fig.show='hold', fig.cap = "Phylogenetic tree of North American cyprinid species. Tip labels have been removed for clarity. n = 194"}
 
 # Create dendrogram, using same colour palette as waffle plot
-plot(FishTreeNA, edge.color = plotCol[1], tip.color = "white", cex = 0.01)
-
-#---------------------------------------------------------------------------------
-# for n = 100
-
-# ConvertAlign <- msaConvert(AlignedFishSeqs, type="seqinr::alignment")
-# 
-# # Using seqinr to create a distance matrix from the aligned sequences
-# DistMatrix <- dist.alignment(ConvertAlign, "identity")
-# 
-# # Using ape to create a Neighbour-Joining Tree
-# FishTree <- nj(DistMatrix)
-# 
-# tipCol <- wes_palette("Zissou1", 5)
-# 
-# plot(FishTree, cex = 0.6, edge.color = tipCol[5], tip.color = "black", no.margin = T)
-
+plot(FishTreeNA, edge.color = plotCol[1], tip.color = "white", cex = 0.05)
 
 ```
 
@@ -373,12 +346,10 @@ plot(FishTreeNA, edge.color = plotCol[1], tip.color = "white", cex = 0.01)
 
 ```{r}
 # Move only the Least Concern IUCN status into a separate data frame
-onlyLC <- dtFishJoinNA %>%
-  filter(redlistCategory == "Least Concern")
+onlyLC <- dtFishJoinNA[redlistCategory %like% "Least Concern"]
 
 # Move all other categories into another data frame
-others <- dtFishJoinNA %>%
-  filter(redlistCategory != "Least Concern")
+others <- dtFishJoinNA[!redlistCategory %like% "Least Concern"]
 
 # Sample down only the Lease Concern so that there's 30 
 set.seed(20)
@@ -390,15 +361,13 @@ dtFish60 <- rbind(others, onlyLC)
 dim(dtFish60)
 table(dtFish60$redlistCategory)
 class(dtFish60)
-rm(onlyLC)
 ```
 
 There are now only 60 observations in this data frame/table, so it will be easier to make into a dendrogram. First, I need to align only these 60 sequences, and ensure that they are an object of class "phylo", so that they can be plotted. 
 
 ```{r}
 # Create a subset of the data frame (just identifier and sequence)
-FishSeqs60 <- dtFish60 %>%
-  select(c(species_name, nucleotides))
+FishSeqs60 <- dtFish60[, c("species_name", "nucleotides")]
 
 # Convert data table/frame to a DNA string set
 FishSeqs60 <- DNAStringSet(FishSeqs60$nucleotides)
@@ -423,51 +392,54 @@ class(FishTree60)
 
 ```
 
-```{r}
+```{r, fig.show='hold', fig.cap = "Phylogenetic tree of North American cyprinid species and their status on the IUCN Red List. Cool to warm colouring indicates increasing risk of species loss; 1 = Least Concern status and 5 = Critically Endangered status. Note: number of species of Least Concern status have been down sampled from 164 to 30, for readability of the plot. n = 60."}
 # Isolate just the ranks, indicating Red List Category
-ranks <- dtFish60$redlistRank
+ranks60 <- dtFish60$redlistRank
 
 # Assign species names to their rank
-ranks <- structure(ranks, names = (dtFish60$species_name))
+ranks60 <- structure(ranks60, names = (dtFish60$species_name))
 
 # Create the dendrogram
-tree <- contMap(FishTree60, ranks, plot=FALSE)
+tree <- contMap(FishTree60, ranks60, plot=FALSE)
 tree <- setMap(tree, invert = TRUE)
 
 # Plot the dendrogram
-plot(tree, fsize = c(0.6,1), outline = FALSE, lwd = c(3,7), leg.txt = "Red List Category")
+plot(tree, fsize = c(0.5,1), outline = FALSE, lwd = c(3,7), leg.txt = "Red List Category")
 
 ```
 
 
 ## Fig 4: Correlation of IUCN status and phylogeny
 
-```{r}
-#phyloCorrelogram from phylosignal
+```{r, fig.show='hold', fig.cap = "Correlation between phylogenetic distance and IUCN Red List status. Red on x-axis indicates statistically significant correlation."}
+# Create phylocorrelogram object
+phyloSigFish.crlg <- phyloCorrelogram(phyloSigFish)
 
+# Create plot
+plot(phyloSigFish.crlg, mar=c(10,3,2,2))
 ```
-
-
-
-# Results and Discussion
-
 
 
 # Acknowledgements
 
 
 # Bibliography
-https://rosannavanhespen.nl/rmarkdown/writing-your-thesis-with-r-markdown-2-text-citations-and-equations/
 
-https://stackoverflow.com/questions/64759969/what-is-the-most-efficient-way-to-remove-empty-columns-in-a-datatable-in-r
+## Websites
 
-https://cran.r-project.org/web/packages/data.table/vignettes/datatable-intro.html
 
-https://statisticsglobe.com/select-subset-of-data-table-columns-in-r
+Martin, A., & akrun. (2020, November 2). What is the most efficient way to remove empty columns in a   datatable in R. Stack Overflow. Retrieved December 10, 2021, from                              https://stackoverflow.com/questions/64759969/what-is-the-most-efficient-way-to-remove-empty-columns-in-a-datatable-in-r 
 
-https://github.com/hrbrmstr/waffle
+Ram, K. (2015, January 22). Karthik/Wesanderson: A Wes Anderson color palette for R. GitHub. Retrieved December 16, 2021, from https://github.com/karthik/wesanderson 
 
-https://github.com/karthik/wesanderson
+Rudis, B. (2015, March 18). HRBRMSTR/Waffle: Make Waffle (square pie) charts in R. GitHub. Retrieved  December 12, 2021, from https://github.com/hrbrmstr/waffle 
 
-https://bioconductor.org/packages/release/bioc/html/Biostrings.html (biostrings)
+Schork, J. (2021, June 25). Select subset of data table columns in R (example): Keep variables.       Statistics Globe. Retrieved December 12, 2021, from                                            https://statisticsglobe.com/select-subset-of-data-table-columns-in-r 
+
+VanHespen, R. (2021, January 14). Writing your thesis with R Markdown (2) – Text, citations and        equations. Rosanna's Research. Retrieved December 16, 2021, from                                        https://rosannavanhespen.nl/rmarkdown/writing-your-thesis-with-r-markdown-2-text-citations-and-equations/ 
+
+
+## 9.2 Journal Articles
+
+
 
