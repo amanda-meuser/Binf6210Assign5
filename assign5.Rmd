@@ -6,13 +6,15 @@ date: "December 17th, 2021"
 bibliography: library.bib
 output: 
   pdf_document:
+    extra_dependencies: "subfig"
     toc: true
     toc_depth: 3
     number_sections: true
 ---
 
 ```{r setup, echo=FALSE}
-knitr::opts_chunk$set(echo = TRUE, tidy.opts=list(width.cutoff=65), tidy = TRUE, error = TRUE)
+library(knitr)
+opts_chunk$set(tidy.opts=list(width.cutoff=70),tidy=TRUE)
 
 ```
 
@@ -20,26 +22,27 @@ knitr::opts_chunk$set(echo = TRUE, tidy.opts=list(width.cutoff=65), tidy = TRUE,
 
 # Introduction
 
-Freshwater minnows are common globally, but with increasing anthropogenic disturbance world wide, species biodiversity is declining. Unique traits that these minnows possess may also be at risk of being lost to extinction. I will be examining the correlation between extinction status of the family *Cyprinidae* and their phylogenetic relatedness, while potentially expanding this to trait data, too. 
+Globally, genetic variation and biodiversity are on the decline [@Stange2021]. Reduced genetic diversity can make it harder for species to adapt after both natural disturbances, which are increasing in severity and frequency due to global climate change [@Banks2013], and to anthropogenic disturbances, which may have an even stronger impact on biodiversity than climate change [@Danneyrolles2019]. Unlike terrestrial environments, where pollutants are generally solid and contained to one area, soluble pollutants can easily disperse through waterways and impact organisms that are far from the initial point of entry of the pollutant [@Moyle1999]. Thus, aquatic environments have been disproportionately impacted by anthropogenic disturbance [@Moyle1999].
 
-Do certain environments require specific conservation efforts, if there is one group of closely related species that are endangered which live in the same environment.
+While freshwater minnows are relatively common in worldwide, they have not escaped the affects of human-mediated disturbance. Currently, just over 30% of evaluated cyprinid minnow species on the IUCN Red List have a classification in one of the 5 threatened or extinct categories (IUCN 2021). Therefore, unique genotypes that these minnows possess may be at risk of being lost to extinction, particularly if threatened species have low evolutionary diversity [@Stange2021]. Research in this area could shed light on whether certain aquatic environments require specific conservation efforts, especially if a community of endangered, phylogenetically--close species live in the same environment.
+
+In this study, I will be combining DNA barcode data of the COI mitochondrial gene with IUCN Red List data, specifically for minnow species in North America. They are an interesting case, as anthropogenic disturbance was very mild on this continent until the Industrial Revolution but has since increase dramatically [@Stange2021]. I will be examining the correlation between IUCN Red List status and phylogenetic relatedness of the family *Cyprinidae*. Specifically, I will be using the R package `phylosignal`, to calculate the lambda parameter of the phylogenetic signal between cyprinid fish species and their conservation status [@Keck2016]. Lambda value of less than 1 would indicate that a trait (in this case, IUCN Red List status) is less similar for closely related species than expected, while a lambda value greater than 1 would indicate that a trait is more similar than expected [@Pagel1999]. I hypothesize that the relatively recent onset of intense disturbance in North America may be driving minnow extinction more strongly than in less disturbed regions, thus, I predict that there will be a positive correlation between increasing extinction risk (worsening IUCN Red List status) and decreasing phylogenetic distance, with a lambda value greater than 1.
+
 
 
 
 # Description of Data Sets
 
-Data was downloaded from BOLD and IUCN Red List on Nov. 29th, 2021. From the IUCN Red List, data was retrieved from going to https://www.iucnredlist.org/search and searching the taxanomic family *Cyprinidae*. The `assessments.csv` file was used and renamed on my local computer for organization. From the BOLD database, data was retrieved by going to https://www.boldsystems.org/index.php/Public_SearchTerms and similarily searching *Cyprinidae*. The Combined TSV file was downloaded, which saved as a text file. 
+The `cyprinid_RedList_assessments.csv` file contains data from the IUCN Red List. The data set was retrieved from going to https://www.iucnredlist.org/search and searching the taxanomic family *Cyprinidae*. This data set contains 2211 observations of 23 variables, which include species name, Red List status, ID numbers, generally where the species is found in the wild, potential extinction status, and multiple notes providing rationale on the Red List status categorization. I primarily will be using the species name and Red List status variables. The `cyprinid_bold_data.txt` file contains data from the BOLD database. The data set was retrieved by going to https://www.boldsystems.org/index.php/Public_SearchTerms and similarily searching *Cyprinidae*. The Combined TSV file was downloaded, which saved as a text file. This data set contains 34,092 observations of 80 variables, which also include species name and many ID numbers, but conversely contains DNA sequence data, specific location of sampling (sometimes even coordinates), and additional metadata for each sample. I intend to use primarily species name and DNA sequence from the BOLD data set, and will use species name from either data set to join them. The main difference between the two sets, however, is that the BOLD data set contains many different observations of the same species, while the IUCN data set contains only one observation per species. Data was downloaded from both BOLD and IUCN Red List on Nov. 29th, 2021. 
 
 
 # Code Section 1 – Data Acquisition, Exploration, Filtering, and Quality Control
 
-I will be using the `tidyverse` package [@Wickham2019], which includes `dplyr` for data wrangling and `ggplot2` for data visualization.
-The package `phylosignal`, will be used to calculate the Lambda parameter of the phylosignal between cyprinid fish species and their IUCN Red List status [@Keck2016].
+I will be using the `tidyverse` package [@Wickham2019], which includes `dplyr` for data wrangling and `ggplot2` for data visualization. However, the majority of my data filtering and managing will be done with `data.table` (Dowle et al. 2021). The package `msa` will be used for sequence alignment [@Bodenhofer2015], while `Biostrings` will be used to convert strings of character data to DNAStringSets (Pages et al. 2021). `seqinr` will be used for creating a distance matrix [@Charif2007], from which `ape` will be used to create a simple dendrogram [@Paradis2019]. The `waffle` package will be used for creating a waffle plot (Rudis 2015), while `wesanderson` will be used for colouring plots (Ram 2015). `phytools` will be used to create a dendrogram with trait data overlain [@Revell2012]. The package `phylosignal`, will be used to calculate phylogenetic signal between cyprinid fish species and their IUCN Red List status [@Keck2016], with `phylobase` as its dependency (Hackathon et al. 2020).
 
 ```{r, results='hide', message=FALSE}
 
 # Package loading 
-library(tools)
 library(tidyverse)  # for manipulation of data.frames 
 library(data.table) # for manipulation of data.tables
 library(msa)        # for sequence alignment
@@ -49,7 +52,6 @@ library(ape)        # for creating basic dendrogram
 library(wesanderson)# for plot colour palettes
 #devtools::install_git("https://git.rud.is/hrbrmstr/waffle.git")
 library(waffle)     # for waffle plot
-library(magrittr)   # waffle dependency
 library(phytools)   # for IUCN dendrogram
 library(phylosignal)# for calculating phylosignal
 library(phylobase)  # for creating phylo4d object
@@ -135,6 +137,7 @@ I've noticed that some of the species names -- formatted *genus species* -- are 
 ```{r, results='hide'} 
 dtFishSeq <- dtFishSeq[!species_name %like% "sp."][!species_name %like% "cf."][!species_name %like% "aff."][!species_name %like% " X "]
 
+dim(dtFishSeq)
 summary(dtFishSeq)
 unique(dtFishSeq$species_name)
 ```
@@ -157,24 +160,24 @@ I need to reduce this data set so that I'm left with only one sequence per speci
 unique(dtFishSeq2$nucleotides)
 ```
 
-Using the `unique()` function above, I can see that there are 9262 unique sequences. I will first filter by this, to cut down on the size of the data set. 
+Using the `unique()` function above, I can see that there are 9264 unique sequences for 19,722 observations. I will first filter by this, to remove observations with identical sequences (which would likely be only within the same species) to cut down on the size of the data set. 
 
 ```{r, results='hide'} 
 distinctFishSeq <- dtFishSeq %>% 
   distinct(nucleotides, .keep_all = TRUE)
 
-summary(distinctFishSeq)
-unique(dtFishSeq2$nucleotides)
+length(unique(distinctFishSeq$nucleotides))
+length(unique(distinctFishSeq$species_name))
 ```
 
-I now 9264 unique sequences. This is still more than 1 sequence per species, however, so I will remove/collapse the additional sequences for each species so that I only have 1 sequence per species. Using the `distinct()` function will simply keep the first entry for each unique entry in the species_name column. While this may not capture all sequence variation, it is an unbiased way to choose one individual to phylogenetically represent the species. 
+I now have 9264 unique sequences, for 1472 species. This is still more than 1 sequence per species, so I will remove/collapse the additional sequences for each species so that I only have 1 sequence per species. Using the `distinct()` function will simply keep the first entry for each unique entry in the species_name column. While this may not capture all sequence variation, it is an unbiased way to choose one individual to phylogenetically represent the species. 
 
 ```{r, results='hide'}
 distinctFishSeq2 <- distinctFishSeq %>% 
   distinct(species_name, .keep_all = TRUE) 
 
-unique(distinctFishSeq2$nucleotides)
-dim(distinctFishSeq2)
+length(unique(distinctFishSeq2$nucleotides))
+length(unique(distinctFishSeq2$species_name))
 ```
 
 I now have the same number of sequences as observations, so I know that I have one sequence per species. 
@@ -220,7 +223,7 @@ head(dtFishJoin)
 names(dtFishJoin)
 ```
 
-There are 965 species in my combined data set, however, as we were advised to have about 50-100 species for this project, I will constrict my data set based on country, to keep only species found in North America. Additionally, for whatever reason, 2 species have very short, negative branch lengths later on when I create my simple dendrogram, so I've been advised by Jacqueline to just remove these two.
+I will now filter by country, to keep only species found in North America. Additionally, for whatever reason, 2 species have very short, negative branch lengths later on when I create my simple dendrogram, so I've been advised by Jacqueline to just remove these two.
 
 ```{r, results='hide'}
 # Look at the number of species per country
@@ -232,9 +235,9 @@ dtFishJoinNA <- dtFishJoin[country %like% "Canada|United States|Mexico"][!specie
 dim(dtFishJoinNA)
 ```
 
-192 observations is a far easier amount of data to work with than the original 965. I will keep these samples to retain as much variability in the data as possible, and only down sample further if needed for visualizations. I have shown, in Fig. 1, that I primarily have species of "Lease Concern" from the IUCN Red List, but that there are a small amount of species that are threatened or endangered. 
+I have shown, in Figure 1, that I primarily have species of "Lease Concern" from the IUCN Red List, but that there are a small amount of species that are threatened or endangered. 
 
-Next, I will align my sequences using `msa()`. I chose to use the default ClustalW algorithm over the well-known MUSCLE algorithm, as ClustalW is comparable in alignment score to MUSCLE and while MUSCLE is faster with large quantities of sequences or with long sequences, my data set consists of only 100 short sequences [@Edgar2004]. Thus, the extra computational power is not needed and ClustalW will perform adequately for this assignment. I chose Neighbour-Joining (NJ) method for clustering, as the secondary option UPGMA has been known to crash the R session on Windows, and NJ has been successfully used for fish species in the literature [@Zou2020]. I used the default parameters for all other arguments. 
+Next, I will align my sequences using `msa()`. I chose to use the well-known MUSCLE algorithm over the default ClustalW algorithm, as ClustalW is comparable in alignment score to MUSCLE, but MUSCLE is faster with large quantities of sequences [@Edgar2004]. As my data set contains 192 sequences, the speed is appreciated. I chose Neighbour-Joining (NJ) method for clustering, as the secondary option UPGMA has been known to crash the R session on Windows, and NJ has been successfully used for fish species in the literature [@Zou2020]. I used the default parameters for all other arguments. 
 
 ```{r}
 # Create a subset of the data frame (just identifier and sequence)
@@ -249,23 +252,17 @@ names(FishSeqsNA) <- paste(dtFishJoinNA$species_name)
 metadata(FishSeqsNA)
 
 # Sequence alignment
-AlignedFishSeqsNA <- msaClustalW(FishSeqsNA, cluster = "nj")
+AlignedFishSeqsNA <- msaMuscle(FishSeqsNA, cluster = "neighborjoining")
 AlignedFishSeqsNA
-
-# msaPrettyPrint(AlignedFishSeqs, file=tmpFile, output="pdf", y=c(164, 213),
-#                subset=c(1:6), showNames="left", showLogo="top", 
-#                logoColor="rasmol", showConsensus = "none", showLegend=FALSE,
-#                askForOverwrite=FALSE)
 
 ```
 
-I have visualized the sequence alignment as a simple dendrogram, in Fig. 2. There appear to be no outlier sequences, so I will continue with my main analysis. 
+I have visualized the sequence alignment as a simple dendrogram, in Figure 2. There appear to be no outlier sequences, so I will continue with my main analysis. 
 
 
 # Main Software Tools Description
 
-I chose to use the package `phylosignal` as my main software tool [@Keck2016]. I chose this package for a couple of reasons. Aside from meeting my main criterion of being able to calculate the Lambda parameter for a trait, I primarily chose `phylosignal` because it contained many functions for visualizing the output from the phylosignal calculation, done with the `phyloSignal()` function. Particularly, I utilized the `phyloCorrelogram()` function to create a correlogram which displays the correlation between phylogenetic distance and IUCN Red List status. Additionally, the `phylosignal` package uses phylogenetic trees of the object type "phylo", which is a common type that makes it compatible with other phylogenetic R packages, such as `ape`, `phytools`,
-
+I chose to use the package `phylosignal` as my main software tool [@Keck2016]. I chose this package for a couple of reasons. Aside from meeting my main criterion of being able to calculate the lambda parameter for a trait, I primarily chose `phylosignal` because it contained many functions for visualizing the output from the calculation of phylogenetic signal, done with the `phyloSignal()` function. Particularly, I utilized the `phyloCorrelogram()` function to create a correlogram which displays the correlation between phylogenetic distance and IUCN Red List status. I considered the `phylosig()` function, from the package `phytools`, however, this package did not have nearly as many nice visualization tools for specifically visualizing phylogenetic signal. Additionally, the `phylosignal` package uses phylogenetic trees of the object type "phylo", which is a common type that makes it compatible with other phylogenetic R packages, such as `ape` and `phytools`.
 
 
 # Code Section 2 - Main Analysis
@@ -295,23 +292,26 @@ ranksNA <- data.frame(ranksNA)
 # Create phylo4d object
 phyloSigFish <- phylo4d(FishTreeNA, ranksNA)
 
-# Calculate Lambda parameter for phylosignal
+# Calculate lambda parameter for phylosignal
 signal <- phyloSignal(p4d = phyloSigFish, method = "Lambda")
 
 (signal)
-
 ```
 
+IUCN Red List status has been mapped onto the phylogeny for cyprinid minnows (Figure 3), for a visual representation of phylogenetic signal. The output of `phyloSignal()`, specifically, has been visualized with a correlogram (Figure 4). 
 
 # Results and Discussion
 
+The value of lambda was calculated to be 0.9495312, with a p-value of 0.001. The p-value indicates the statistical significance of the lambda calculation, thus, the calculation is sound as is it below the traditional threshold of 0.05. The value of lambda is less than 1, indicating that the correlation between trait (IUCN Red List status) and phylogenetic distance is slightly weaker than expected in nature [@Pagel1999]. Indeed, while a slight positive correlation can be seen in Figure 4, it is only seen in species that are extrememely closely related. These results oppose my prediction that the relatively recent onset of intensive anthropogenic disturbance in North America has driven minnow extinction to greater than normal levels in specific aquatic environments [@Stange2021]. This may be due to anthropogenic disturbance affecting aquatic environments fairly universally in North America, as human populations are fairly evenly distributed in the same regions as minnows: everywhere south of the arctic circle. 
 
+To improve upon this study, I would spend more time addressing ways to keep one DNA sequence per species that most accurately portrays intra-species sequence variation. The `collapseDuplicates()` function appears to do something similar, by removing all identical sequences (including those with ambiguous characters, like N or -), however, its dependency, `GenomicAlignments`, is not available, rendering the function unusable. Additionally, this function doesn't allow grouping, thus I would be required to create a separate data set for each species, but if any species had SNPs in their sequences, the function would believe them to be different and I would still be left with more than one sequence per species. Ideally, I would perform an analysis that would give me a probability for each nucleotide in the sequence, and I could use those probabilities to estimate phylogeny. However, this type of analysis was outside of the scope of this project.
 
+This study would be excellent to replicate for additional species. Cyprinid minnows are very common in North America, and have been previously shown to be somewhat pollution-tolerant [@Schultz2003]. Thus, while minnows may be handling the impacts of anthropogenic disturbance on streams and rivers somewhat well, other freshwater species may not be. This study could be replicated with various groups of amphibians, reptiles, or benthic invertebrates, to see if these groups are facing photogenically correlated threats of extinction as a result of being similarly are affected by disturbances to streams and rivers. While my results indicate that the *Cyprinidae* family may be tolerating anthropogenic disturbances to a degree, not all may fair the same. 
 
 
 # Figures
 
-## Fig 1: Barplot of species, per IUCN status, per country
+## Figure 1: Barplot of species, per IUCN status, per country
 
 ```{r, fig.show='hold', fig.cap = "Barplot of number of species per ICUN Red List classification. 1 box = ~2 species, n = 192."}
 
@@ -331,18 +331,18 @@ ggplot(FishWaffleNA, aes(fill = redlistRank, values = n)) +
 ```
 
 
-## Fig 2: Dendeogram 
+## Figure 2: Dendeogram 
 
 
-```{r, fig.show='hold', fig.cap = "Phylogenetic tree of North American cyprinid species. Tip labels have been removed for clarity. n = 194"}
+```{r, fig.show='hold', fig.cap = "Phylogenetic tree of North American cyprinid species. Tip labels have been removed for clarity. n = 192"}
 
 # Create dendrogram, using same colour palette as waffle plot
-plot(FishTreeNA, edge.color = plotCol[1], tip.color = "white", cex = 0.05)
+plot(FishTreeNA, edge.color = plotCol[1], tip.color = "white", cex = 0.0001)
 
 ```
 
 
-## Fig 3: Dendrogram coloured by ICUN status
+## Figure 3: Dendrogram coloured by ICUN status
 
 ```{r}
 # Move only the Least Concern IUCN status into a separate data frame
@@ -363,7 +363,7 @@ table(dtFish60$redlistCategory)
 class(dtFish60)
 ```
 
-There are now only 60 observations in this data frame/table, so it will be easier to make into a dendrogram. First, I need to align only these 60 sequences, and ensure that they are an object of class "phylo", so that they can be plotted. 
+There are now only 60 observations in this data frame/table, so it will be easier to make into a clear, readable dendrogram. First, I need to align only these 60 sequences, and ensure that they are an object of class "phylo", so that they can be plotted. 
 
 ```{r}
 # Create a subset of the data frame (just identifier and sequence)
@@ -378,7 +378,7 @@ names(FishSeqs60) <- paste(dtFish60$species_name)
 metadata(FishSeqs60)
 
 # Sequence alignment
-AlignedFishSeqs60 <- msaClustalW(FishSeqs60, cluster = "nj")
+AlignedFishSeqs60 <- msaMuscle(FishSeqs60, cluster = "neighborjoining")
 
 # Converting the alignment to a seqinr object
 ConvertAlign60 <- msaConvert(AlignedFishSeqs60, type="seqinr::alignment")
@@ -392,7 +392,10 @@ class(FishTree60)
 
 ```
 
-```{r, fig.show='hold', fig.cap = "Phylogenetic tree of North American cyprinid species and their status on the IUCN Red List. Cool to warm colouring indicates increasing risk of species loss; 1 = Least Concern status and 5 = Critically Endangered status. Note: number of species of Least Concern status have been down sampled from 164 to 30, for readability of the plot. n = 60."}
+```{r, fig.show='hold', fig.ncol = 1, out.width = "85%", fig.cap = "Phylogenetic tree of North American cyprinid species and their status on the IUCN Red List. Cool to warm colouring indicates increasing risk of species loss; 1 = Least Concern status and 5 = Critically Endangered status. Length indicates genetic distance for the length of the legend bar.", fig.subcap = c("The number of species of Least Concern status have been down sampled from 162 to 30, for readability of the plot. n = 60.", "All species, included to show general trend of phylogenetic signal. The species names have been hidden for clarity of the branch colours. n = 192")}
+
+# a. Only 60 species
+
 # Isolate just the ranks, indicating Red List Category
 ranks60 <- dtFish60$redlistRank
 
@@ -406,12 +409,29 @@ tree <- setMap(tree, invert = TRUE)
 # Plot the dendrogram
 plot(tree, fsize = c(0.5,1), outline = FALSE, lwd = c(3,7), leg.txt = "Red List Category")
 
+#-----------------------------------------------------------------------------
+
+# b. All 192 species
+
+# Isolate just the ranks, indicating Red List Category
+ranksNA2 <- dtFishJoinNA$redlistRank
+
+# Assign species names to their rank
+ranksNA2 <- structure(ranksNA2, names = (dtFishJoinNA$species_name))
+
+# Create the dendrogram
+treeNA <- contMap(FishTreeNA, ranksNA2, plot=FALSE)
+treeNA <- setMap(treeNA, invert = TRUE)
+
+# Plot the dendrogram
+plot(treeNA, fsize = c(0.000001,1), outline = FALSE, lwd = c(3,7), leg.txt = "Red List Category")
+
 ```
 
 
-## Fig 4: Correlation of IUCN status and phylogeny
+## Figure 4: Correlation of IUCN status and phylogeny
 
-```{r, fig.show='hold', fig.cap = "Correlation between phylogenetic distance and IUCN Red List status. Red on x-axis indicates statistically significant correlation."}
+```{r, fig.show='hold', fig.cap = "Correlation between phylogenetic distance and IUCN Red List status. Red on x-axis indicates significant positive correlation, while black indicates no correlation."}
 # Create phylocorrelogram object
 phyloSigFish.crlg <- phyloCorrelogram(phyloSigFish)
 
@@ -422,21 +442,30 @@ plot(phyloSigFish.crlg, mar=c(10,3,2,2))
 
 # Acknowledgements
 
+I discussed the use of RMarkdown's various options for displaying plots with Shalvi Chirmade and Emily Maier. I essentailly just gave advice to them, so it didn't impact my own project. 
+
 
 # Bibliography
 
 ## Websites
 
+Dowle, M. (2021, September 27). Extension of 'data.frame' [R package data.table version 1.14.2]. The Comprehensive R Archive Network. Retrieved November 30, 2021, from https://cran.r-project.org/web/packages/data.table/ 
 
-Martin, A., & akrun. (2020, November 2). What is the most efficient way to remove empty columns in a   datatable in R. Stack Overflow. Retrieved December 10, 2021, from                              https://stackoverflow.com/questions/64759969/what-is-the-most-efficient-way-to-remove-empty-columns-in-a-datatable-in-r 
+Hackathon, R. (2020). Package phylobase. CRAN. Retrieved December 13, 2021, from https://cran.r-project.org/web/packages/phylobase/index.html 
+
+The IUCN Red List of Threatened Species. Version 2021-3. IUCN. (2021). Retrieved November 29, 2021, from https://www.iucnredlist.org/ 
+
+Martin, A., & akrun. (2020, November 2). What is the most efficient way to remove empty columns in a datatable in R. Stack Overflow. Retrieved December 10, 2021, from https://stackoverflow.com/questions/64759969/what-is-the-most-efficient-way-to-remove-empty-columns-in-a-datatable-in-r 
+
+Pages, H., Aboyoun, P., Gentleman, R., & DebRoy, S. (2021). Biostrings: Efficient manipulation of biological strings. Bioconductor. Retrieved December 3, 2021, from https://bioconductor.org/packages/release/bioc/html/Biostrings.html 
 
 Ram, K. (2015, January 22). Karthik/Wesanderson: A Wes Anderson color palette for R. GitHub. Retrieved December 16, 2021, from https://github.com/karthik/wesanderson 
 
-Rudis, B. (2015, March 18). HRBRMSTR/Waffle: Make Waffle (square pie) charts in R. GitHub. Retrieved  December 12, 2021, from https://github.com/hrbrmstr/waffle 
+Rudis, B. (2015, March 18). HRBRMSTR/Waffle: Make Waffle (square pie) charts in R. GitHub. Retrieved December 12, 2021, from https://github.com/hrbrmstr/waffle 
 
-Schork, J. (2021, June 25). Select subset of data table columns in R (example): Keep variables.       Statistics Globe. Retrieved December 12, 2021, from                                            https://statisticsglobe.com/select-subset-of-data-table-columns-in-r 
+Schork, J. (2021, June 25). Select subset of data table columns in R (example): Keep variables. Statistics Globe. Retrieved December 12, 2021, from https://statisticsglobe.com/select-subset-of-data-table-columns-in-r 
 
-VanHespen, R. (2021, January 14). Writing your thesis with R Markdown (2) – Text, citations and        equations. Rosanna's Research. Retrieved December 16, 2021, from                                        https://rosannavanhespen.nl/rmarkdown/writing-your-thesis-with-r-markdown-2-text-citations-and-equations/ 
+VanHespen, R. (2021, January 14). Writing your thesis with R Markdown (2) – Text, citations and equations. Rosanna's Research. Retrieved December 16, 2021, from https://rosannavanhespen.nl/rmarkdown/writing-your-thesis-with-r-markdown-2-text-citations-and-equations/ 
 
 
 ## 9.2 Journal Articles
